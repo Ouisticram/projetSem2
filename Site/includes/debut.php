@@ -6,7 +6,39 @@
 		<?php
         echo (!empty($titre))?'<title>'.$titre.'</title>':'<title> Node Wars Project </title>';
         ?>
-	</head>
+        <script src="/socket.io/socket.io.js"> </script> 
+		<link rel="stylesheet" href="//netdna.bootstrapcdn.com/bootstrap/3.0.3/css/bootstrap.min.css">
+		<style>
+	      body {
+	      padding-top: 50px;
+	      background-color:#333333;
+	      }
+
+	      #main{
+	      width:100%;
+	      }
+
+	      td{width:50%;}
+	      
+	      #actionGroup{
+	      text-align:right;
+	      }
+
+	      .container{
+	      margin:0px;
+	      padding:0px;
+	      width:100%;
+	      }
+
+	      #mainFrame{margin-top:4px;}
+
+	      #editor{
+	      width:101%;
+	      height:480px;
+	      display:block;
+	      box-sizing: border-box;}
+	    </style>
+	 </head>
 	<body>
 	<header>
 		<!--<a href="index.php"><img alt="Bannière" src="images/banniere.png" /></a>-->
@@ -30,3 +62,4 @@
 			</li>
 		</ul>
 		</nav>
+
