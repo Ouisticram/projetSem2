@@ -1,26 +1,35 @@
 var socket = io.connect("http:localhost");
+
 var _canvas  = document.getElementById("mainFrame");
 var _context = _canvas.getContext("2d");
 var _border = 2;
 var _width = _canvas.width - _border *2;
 var _height = _canvas.height - _border *2 ;
 
+var _canvas2 = document.getElementById("secondFrame");
+var _context2 = _canvas2.getContext("2d");
+
+
 var REFRESHTIME = 30; // 30ms
 var BACKGROUNDCOLOR = '#272822';
 var t = Date.now();
 var fin = false;
-var dead = [];
+var temps = 0;
+var score = 0;
+var tempsRestant = 0;
+var vague2 = 1;
+var nbDeadEnemies = 0;
 
 // #0 initialization of the player's document
 var editor = document.getElementById("editor");
-editor.innerHTML = "function mainloop() {\n};\n\nfunction shoot(){\n//#1 get nearest object\n//#2 process vector and return x,y\n};\n\nfunction move(){\n//# repulsive field\n};\n";
+editor.innerHTML = "function move_player(){\n\tvar dir = [];\n\tif((gameObjects[0]._bbox._x<100)&&(gameObjects[0]._bbox._y<380)){\n\t\tdir[0] = 50;\n\t\tdir[1] = 390;\n\t} else{\n\t\tif((gameObjects[0]._bbox._x<540)&&(gameObjects[0]._bbox._y>=380)){\n\t\t\tdir[0] = 550;\n\t\t\tdir[1] = 390;\n\t\t} else{\n\t\t\tif((gameObjects[0]._bbox._x>=540)&&(gameObjects[0]._bbox._y>=100)){\n\t\t\t\tdir[0] = 550;\n\t\t\t\tdir[1] = 50;\n\t\t\t} else{\n\t\t\t\tif((gameObjects[0]._bbox._x>=100)&&(gameObjects[0]._bbox._y<100)){\n\t\t\t\t\tdir[0] = 50;\n\t\t\t\t\tdir[1] = 50;\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n\tmove(dir[0],dir[1]);\n}\nmove_player();\nif(getNearest(1)._x != -1 && getNearest(1)._y != -1) shoot(getNearest(1)._x, getNearest(1)._y);";
 function commit(){
     socket.emit("commit",
 		JSON.stringify(
 		    editor.getSession().getDocument().getAllLines()));
 };
 
-// #1 initialization of the canevas
+// #1A initialization of the canevas
 _context.beginPath();
 _context.rect(0,
               0,
@@ -30,11 +39,26 @@ _context.closePath();
 _context.fillStyle = BACKGROUNDCOLOR;
 _context.fill();
 
+// #1B initialization of the second canevas
+_context2.beginPath();
+_context2.rect(70,0,500,100);
+_context2.lineWidth="5";
+_context2.strokeStyle="red";
+_context2.closePath();
+_context2.fillStyle = "#696969";
+_context2.fill();
+_context2.fillStyle = "blue"
+_context2.font = "20px Verdana";
+_context2.fillText("Score : " + score + "",80, 35);
+_context2.fillText("Prochaine vague : "+ tempsRestant,300, 35);
+_context2.fillText("Ennemis tués : " + nbDeadEnemies + "",80, 85);
+_context2.fillText("Vague : "+ vague2,300, 85);
+
+
+
 // #2 game object structure
 var gameObjects = []; // current game objects
-var gameObjectsOldPosition = []; // old bounding box of objects
 var bulletObjects = []; // current bullet objects
-var bulletObjectsOldPosition = []; // old bouding box of bullets
 // #3 manage event
 // #3a receive event of the initialization of a game object
 // data._id, data._type, data._bbox, data._speed
@@ -45,7 +69,6 @@ socket.on('init', function(data) {
 		_y:realData._bbox._y,
 		_w:realData._bbox._w,
 		_h:realData._bbox._h};
-    gameObjectsOldPosition[keys[i]] = bbox;
 });
 
 socket.on('initBullet', function(data) {
@@ -55,35 +78,45 @@ socket.on('initBullet', function(data) {
         _y:realData._bbox._y,
         _w:realData._bbox._w,
         _h:realData._bbox._h};
-    bulletObjectsOldPosition[keys[i]] = bbox;
 });
 
 // #3b receive event of update on direction and position of the object
 // data._id, data._x, data._y, data._speed
 socket.on('gameobject', function (data) {
     var realData = JSON.parse(data);
-    var bbox = {_x:gameObjects[realData._id]._bbox._x,
-		_y:gameObjects[realData._id]._bbox._y,
-		_w:gameObjects[realData._id]._bbox._w,
-		_h:gameObjects[realData._id]._bbox._h};
-    gameObjectsOldPosition[realData._id] = bbox;
     gameObjects[realData._id]._bbox._x = realData._x;
     gameObjects[realData._id]._bbox._y = realData._y;
     gameObjects[realData._id]._speed = realData._speed;
 });
 
-socket.on('clearObject', function(data) {
+socket.on('colorchange', function (data) {
     var realData = JSON.parse(data);
+    gameObjects[realData._id]._type = realData._type;
+});
+
+socket.on('disconnect', function() {
+    clearInterval(idBoucle);
+    t = Date.now();
+    fin = false;
+    dead = [];
+    temps = 0;
+    tempsRestant = 0;
+    gameObjects = [];
+    bulletObjects = [];
+    vague2 = 0;
+    vague = 0;
+    nbDeadEnemies = 0;
+});
+
+socket.on('clearObject', function(data) {
+    realData = JSON.parse(data);
     if (realData._type == "deadI"){
-        gameObjects[realData._id]._type = realData._type;
-        gameObjects[realData._id]._bbox._w = realData._w;
-        gameObjects[realData._id]._bbox._h = realData._h;
-        dead[0] = realData._id;
+        clearDeadObject(realData._id, realData._type);
+        gameObjects[realData._id] = null;
     }else if (realData._type == "deadB"){
-        bulletObjects[realData._id]._type = realData._type;
-        bulletObjects[realData._id]._bbox._w = realData._w;
-        bulletObjects[realData._id]._bbox._h = realData._h;
-    };
+        clearDeadObject(realData._id, realData._type);
+        bulletObjects[realData._id] = null;
+    }
 });
 
 socket.on('defeat', function () {
@@ -102,6 +135,17 @@ socket.on('defeat', function () {
     _context.fillText("perdu",270, 240);
 });
 
+// calculate score
+socket.on('score', function (vague, valeur, temps){
+    score = score + 100 * vague + valeur + temps;
+    if (vague != 0){vague2++;}
+    //if (valeur != 0){nbDeadEnemies++;}
+});
+
+socket.on('tempsRestant', function (vague){
+    tempsRestant = vague;
+});
+
 // #4 update and draw all objects
 var idBoucle = setInterval(mainLoop, REFRESHTIME);
 
@@ -113,10 +157,9 @@ function mainLoop(){
         t = now;
         updateAll(dt);
         drawAll();
-        clearDeadObject();
-        dead = [];
     };
 };
+
 
 // #4b update the position of all game objects
 function updateAll(dt){
@@ -124,90 +167,140 @@ function updateAll(dt){
     var keysBullet = Object.keys(bulletObjects);
     for (var i=0; i<keys.length; ++i){
     	// a Save the old values
-    	var bbox = {_x:gameObjects[keys[i]]._bbox._x,
-    		    _y:gameObjects[keys[i]]._bbox._y,
-    		    _w:gameObjects[keys[i]]._bbox._w,
-    		    _h:gameObjects[keys[i]]._bbox._h};
-    	gameObjectsOldPosition[keys[i]] = bbox;
-    	// b Update values
-    	gameObjects[keys[i]]._bbox._x = gameObjects[keys[i]]._bbox._x
-    	    + gameObjects[keys[i]]._speed._h * dt; // update x coordinate
-    	gameObjects[keys[i]]._bbox._y = gameObjects[keys[i]]._bbox._y
-    	    + gameObjects[keys[i]]._speed._v * dt; // update y coordinate
+    	if (gameObjects[i] != null){
+        	// b Update values
+        	gameObjects[keys[i]]._bbox._x = gameObjects[keys[i]]._bbox._x
+        	    + gameObjects[keys[i]]._speed._h * dt; // update x coordinate
+        	gameObjects[keys[i]]._bbox._y = gameObjects[keys[i]]._bbox._y
+        	    + gameObjects[keys[i]]._speed._v * dt; // update y coordinate
+        }
     };
     for (var i=0; i<keysBullet.length; ++i){
         // a Save the old values
-        var bboxbullet = {_x:bulletObjects[keysBullet[i]]._bbox._x,
-                _y:bulletObjects[keysBullet[i]]._bbox._y,
-                _w:bulletObjects[keysBullet[i]]._bbox._w,
-                _h:bulletObjects[keysBullet[i]]._bbox._h};
-        bulletObjectsOldPosition[keysBullet[i]] = bboxbullet;
-        // b Update values
-        bulletObjects[keysBullet[i]]._bbox._x = bulletObjects[keysBullet[i]]._bbox._x
-            + bulletObjects[keysBullet[i]]._speed._h * dt; // update x coordinate
-        bulletObjects[keysBullet[i]]._bbox._y = bulletObjects[keysBullet[i]]._bbox._y
-            + bulletObjects[keysBullet[i]]._speed._v * dt; // update y coordinate
+        if (bulletObjects[i] != null){
+            // b Update values
+            bulletObjects[keysBullet[i]]._bbox._x = bulletObjects[keysBullet[i]]._bbox._x
+                + bulletObjects[keysBullet[i]]._speed._h * dt; // update x coordinate
+            bulletObjects[keysBullet[i]]._bbox._y = bulletObjects[keysBullet[i]]._bbox._y
+                + bulletObjects[keysBullet[i]]._speed._v * dt; // update y coordinate
+       }
     };
 };
 
-function clearDeadObject(){
-    _context.beginPath();
-    _context.rect(gameObjects[dead[0]]._x-5,
-         gameObjects[dead[0]]._y-5,
-         gameObjects[dead[0]]._w+10,
-         gameObjects[dead[0]]._h+10);
-    _context.closePath();
-    _context.fillStyle = BACKGROUNDCOLOR;
-    _context.fill();
+function clearDeadObject(idDead, typeDead){
+    if (idDead != null){
+        if (typeDead == "deadI"){
+            nbDeadEnemies++;
+            _context.beginPath();
+            _context.rect(gameObjects[idDead]._bbox._x-5,
+                 gameObjects[idDead]._bbox._y-5,
+                 gameObjects[idDead]._bbox._w+10,
+                 gameObjects[idDead]._bbox._h+10);
+            _context.closePath();
+            _context.fillStyle = BACKGROUNDCOLOR;
+            _context.fill();
+        }else if (typeDead == "deadB"){
+             _context.beginPath();
+            _context.rect(bulletObjects[idDead]._bbox._x-5,
+                 bulletObjects[idDead]._bbox._y-5,
+                 bulletObjects[idDead]._bbox._w+10,
+                 bulletObjects[idDead]._bbox._h+10);
+            _context.closePath();
+            _context.fillStyle = BACKGROUNDCOLOR;
+            _context.fill();
+        }
+    }
 }
 
 // #4c draw the game objects to their rightful position
 function drawAll(){
     var keys = Object.keys(gameObjects);
     var keysBullet = Object.keys(bulletObjects);
+    // a clear the whole screen
+    _context.beginPath();
+    _context.rect(0,0,_canvas.width,_canvas.height);
+    _context.closePath();
+    _context.fillStyle = BACKGROUNDCOLOR;
+    _context.fill();
+
     for (var i=0; i<keys.length; ++i){
     	// a clear the old position
-    	_context.beginPath();
-        _context.rect(gameObjectsOldPosition[keys[i]]._x-5,
-            gameObjectsOldPosition[keys[i]]._y-5,
-            gameObjectsOldPosition[keys[i]]._w+10,
-            gameObjectsOldPosition[keys[i]]._h+10);
-    	_context.closePath();
-    	_context.fillStyle = BACKGROUNDCOLOR;
-    	_context.fill();
-    	// b draw the object at its new position
-    	switch (gameObjects[keys[i]]._type){
-        	case "player":
-        	    drawPlayer(gameObjects[keys[i]]._bbox,gameObjects[keys[i]]._speed);
-        	    break;
-        	case "enemy1":
-        	    drawEnemy(gameObjects[keys[i]]._bbox, "red");
-        	    break;
-        	case "enemy2":
-        	    drawEnemy(gameObjects[keys[i]]._bbox, "yellow");
-        	    break;
-        	case "enemy3":
-        	    drawEnemy(gameObjects[keys[i]]._bbox, "purple");
-        	    break;
-    	};
+    	if(gameObjects[i] != null){
+        	// b draw the object at its new position
+        	switch (gameObjects[keys[i]]._type){
+            	case "player":
+            	    drawPlayer(gameObjects[keys[i]]._bbox,gameObjects[keys[i]]._speed);
+            	    break;
+            	case "enemy1":
+            	    drawEnemy(gameObjects[keys[i]]._bbox, "red");
+            	    break;
+            	case "enemy2":
+            	    drawEnemy(gameObjects[keys[i]]._bbox, "yellow");
+            	    break;
+            	case "enemy3":
+            	    drawEnemy(gameObjects[keys[i]]._bbox, "purple");
+            	    break;
+                case "deadI":
+                    drawEnemyDead(gameObjects[keys[i]]._bbox, "green");
+                    break;
+        	}
+       }
     };
     for (var i=0; i<keysBullet.length; ++i){
-        // a clear the old position
-        _context.beginPath();
-        _context.rect(bulletObjectsOldPosition[keysBullet[i]]._x-5,
-            bulletObjectsOldPosition[keysBullet[i]]._y-5,
-            bulletObjectsOldPosition[keysBullet[i]]._w+10,
-            bulletObjectsOldPosition[keysBullet[i]]._h+10);
-        _context.closePath();
-        _context.fillStyle = BACKGROUNDCOLOR;
-        _context.fill();
-        // b draw the object at its new position
-        switch (bulletObjects[keysBullet[i]]._type){
-            case "bullet":
-                drawBullet(bulletObjects[keysBullet[i]]._bbox);
-            break;
-        };
+        if(bulletObjects[i] != null){
+            // b draw the object at its new position
+            switch (bulletObjects[keysBullet[i]]._type){
+                case "bullet":
+                    drawBullet(bulletObjects[keysBullet[i]]._bbox);
+                    break;
+                case "deadB":
+                    drawBulletDead(bulletObjects[keysBullet[i]]._bbox);
+                    break;
+            }
+        }
     };
+    
+    _context2.beginPath();
+    _context2.rect(70,0,500,100);
+    _context2.lineWidth="5";
+    _context2.strokeStyle="red";
+    _context2.closePath();
+    _context2.fillStyle = "#696969";
+    _context2.fill();
+    _context2.fillStyle = "blue"
+    _context2.font = "20px Verdana";
+    _context2.fillText("Score : " + score + "",80, 35);
+    _context2.fillText("Prochaine vague : "+ tempsRestant,300, 35);
+    _context2.fillText("Ennemis tués : " + nbDeadEnemies + "",80, 85);
+    _context2.fillText("Vague : "+ vague2,300, 85);
+};
+
+// Draw the box of the enemy
+function drawEnemyDead(bbox, color){
+    _context.beginPath();
+    _context.rect(bbox._x,
+                  bbox._y,
+                  bbox._w,
+          bbox._h);
+    _context.closePath();
+    _context.lineWidth=2;
+    _context.strokeStyle = color;
+    _context.stroke();
+    _context.fillStyle = '#BDBDBD';//lightgrey
+    //_context.fillStyle = 'rgb(255,255,255)';
+    _context.fill();
+    _context.beginPath();
+    _context.rect(bbox._x+bbox._w/4,
+                  bbox._y+bbox._h/4,
+                  bbox._w-bbox._w/2,
+          bbox._h-bbox._h/2);
+    _context.closePath();
+    _context.lineWidth=3;
+    _context.strokeStyle = color;
+    _context.stroke();
+    _context.fillStyle = '#BDBDBD';//lightgrey
+    //_context.fillStyle = 'rgb(255,255,255)';
+    _context.fill();
 };
 
 // Draw the box of the enemy
@@ -219,11 +312,9 @@ function drawEnemy(bbox, color){
 		  bbox._h);
     _context.closePath();
     _context.lineWidth=2;
-    //_context.strokeStyle = color;
-     _context.strokeStyle = '#0101DF';
+    _context.strokeStyle = color;
     _context.stroke();
-    //_context.fillStyle = '#BDBDBD';//lightgrey
-    _context.fillStyle = '#0101DF';
+    _context.fillStyle = '#BDBDBD';//lightgrey
     //_context.fillStyle = 'rgb(255,255,255)';
     _context.fill();
     _context.beginPath();
@@ -233,11 +324,9 @@ function drawEnemy(bbox, color){
 		  bbox._h-bbox._h/2);
     _context.closePath();
     _context.lineWidth=3;
-    //_context.strokeStyle = color;
-    _context.strokeStyle = '#0101DF';
+    _context.strokeStyle = color;
     _context.stroke();
-    //_context.fillStyle = '#BDBDBD';//lightgrey
-    _context.fillStyle = '#0101DF';
+    _context.fillStyle = '#BDBDBD';//lightgrey
     //_context.fillStyle = 'rgb(255,255,255)';
     _context.fill();
 };
@@ -280,6 +369,20 @@ function drawPlayer(bbox, speed){
 };
 
 // Draw the circle of the bullet
+function drawBulletDead(bbox){
+    _context.beginPath();
+    _context.arc(bbox._x+bbox._w/2,
+         bbox._y+bbox._h/2,
+         bbox._w/2, 0, 2 * Math.PI, false);
+    _context.closePath();
+    _context.lineWidth = 2;
+    _context.strokeStyle = 'green';
+    _context.stroke();
+    _context.fillStyle = 'lightgrey';//lightgrey
+    _context.fill();
+};
+
+// Draw the circle of the bullet
 function drawBullet(bbox){
     _context.beginPath();
     _context.arc(bbox._x+bbox._w/2,
@@ -292,15 +395,3 @@ function drawBullet(bbox){
     _context.fillStyle = 'lightgrey';//lightgrey
     _context.fill();
 };
-
-/*var enemy = {_id:0,
-	     _bbox:{_x:50, _y:50, _w:15, _h:15 },
-	     _speed:{_v:0,_h:0},
-	     _type:"player"};*/
-
-// gameObjects[0]=enemy;
-// gameObjectsOldPosition[0]=enemy._bbox;
-
-
-// setTimeout(function(){gameObjects[0]._speed = {_v:0.1,_h:0.1}; }, 5000);
-// setTimeout(function(){gameObjects[0]._speed = {_v:-0.1,_h:-0.1}; }, 10000);

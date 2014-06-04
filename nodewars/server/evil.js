@@ -5,28 +5,8 @@ var fs   = require("fs");
 var grid = require("./grid");
 var bbox = require("./bbox");
 var REFRESHTIME = 15; // 15ms
-var REFRESHTIME2 = 300; // 300ms
-var t = Date.now();
-// variable contenant la liste de tout les objets sur la map avec leur position actuel
-var gameObjects;
-// variable contenant la liste de tout les objets sur la map avec leur acienne position (dépend du REFRESHTIME)
-var gameObjectsOldPosition;
-// current bullet objects
-var bulletObjects;
-// old bouding box of bullets
-var bulletObjectsOldPosition;
-// Variable contenant la position des quatre murs du terrain de jeu
-var murs;
-// Liste des ennemies mort
-var morts;
-// Variable qui donne un id aux bullets
-var idShoot;
-// numéro de la vague
-var vague;
-// temps écoulé depuis le début du jeu en secondes
-var temps;
-// temps total - temps depuis le début de la vague actuelle
-var ancienTemps;
+var REFRESHTIME2 = 500; // 500ms
+var REFRESHTIME3 = 1000; // 1 seconde
 
 // Définition du port sur lequel le serveur écoute
 evil.listen(1337);
@@ -46,6 +26,16 @@ function httpHandler(req, res) {
     	    res.end(data);
     	});
     };
+    if (page=="/about"){
+        fs.readFile("../client/about.html", function (err, data) {
+            if (err){
+                res.writeHead(500);
+                return res.end("No about found");
+            };
+            res.writeHead(200);
+            res.end(data);
+        });
+    };
     if (page=="/event.js"){
         fs.readFile("../client/event.js", function (err, data) {
             if (err){
@@ -60,7 +50,38 @@ function httpHandler(req, res) {
 
 // socket déclenché au chargement de la page
 io.sockets.on('connection', function (socket){
-    
+    // temps actuel
+    var t;
+    // variable contenant la liste de tout les objets sur la map avec leur position actuel
+    var gameObjects;
+    // current bullet objects
+    var bulletObjects;
+    // variable contenant la position des quatre murs du terrain de jeu
+    var murs;
+    // liste des ennemies mort
+    var morts;
+    // variable qui donne un id aux bullets
+    var idShoot;
+    // numéro de la vague
+    var vague;
+    // temps écoulé depuis le début du jeu en secondes
+    var temps;
+    // temps total - temps depuis le début de la vague actuelle
+    var ancienTemps;
+    // code de l'utilisateur récupéré par le commit
+    var linearized;
+    // variable qui gère l'intervale de temps entre les tirs
+    var tpshoot;
+    // variable qui gère l'intervale de temps entre les mise à jour de déplacement d'IA
+    var tpsIA;
+    // variable qui gère l'intervale de temps entre les mise à jour de déplacement du joueur
+    var tpsmove;
+    // temps
+    var accu;
+    // temps
+    var accu2;
+    // temps restant avant la prochaine vague
+    var tempsNextWave;
     // Variable qui va servir à initialiser les vaisseaux
     var obj;
     // Variable qui contient le type d'ennemi
@@ -71,40 +92,10 @@ io.sockets.on('connection', function (socket){
     // initialisation de la variable du joueur
     obj = {_id:0,
 		  _bbox:{_x:50, _y:50, _w:20, _h:20 },
-		  _speed:{_v:0.08,_h:0},
+		  _speed:{_v:0,_h:0},
 		  _type:"player"};
     // On appel la fonction init, pour initialiser la variable joueur
-    init(JSON.stringify(obj));    
-
-    // Création des IAs et initialisation du côté client et serveur
-    /*for(var id=1;id<=5;id++){
-        morts[id] = 1;
-        switch (id) {
-            case 1 :
-                ennemi = "enemy1"
-                break;
-            case 2 :
-                ennemi = "enemy2"
-                break;
-            case 3 :
-                ennemi = "enemy2"
-                break;
-            case 4 :
-                ennemi = "enemy1"
-                break;
-            case 5 :
-                ennemi = "enemy3"
-                break;
-            default :
-                ennemi = "enemy1"
-                break;
-        };
-        obj = {_id:id,
-    		  _bbox:{_x:100+Math.random()*200, _y:100+Math.random()*200, _w:20, _h:20 },
-    		  _speed:{_v:0.01,_h:0},
-    		  _type:ennemi};
-        init(JSON.stringify(obj));
-    };*/
+    init(obj);
     
     // Création des box des murs du jeu
     murs[0] = new bbox(630, 240, 1, 480); // droit
@@ -113,9 +104,9 @@ io.sockets.on('connection', function (socket){
     murs[3] = new bbox(320, 470, 640, 1); // bas
 
     // On lance la fonction mainLoop() tout les X secondes (dépend de la variable REFRESHTIME)
-    var idMainBoucle = setInterval(mainLoop, REFRESHTIME);
-    // On lance la fonction shoot tout les X secondes (dépend de la variable REFRESHTIME2)
-    var idShotBoucle = setInterval(shoot, REFRESHTIME2);
+    var idMainBoucle;
+
+    //console.log("l'id de l'utilisateur est "+io.sockets.socket(id));
 
     /**
      * Boucle principale du serveur
@@ -125,29 +116,65 @@ io.sockets.on('connection', function (socket){
         var dt = now - t;
         t = now;
 
-        //console.log(gameObjects);
+        if (accu < 1) socket.emit('tempsRestant',accu2);
+        accu += dt;
+        tpshoot += dt;
+        tpsIA += dt;
+        tpsmove += dt;
 
-        if (ancienTemps + vague * 2 <= temps) // 10s de plus par vague
+        if (accu >= 1000) 
+        {   
+            accu2--;
+            socket.emit('tempsRestant',accu2);
+            if (accu2 == 0) accu2 = tempsNextWave*(vague+1);
+            accu = accu - 1000;
+            socket.emit('score',0,0,10);
+        }
+
+        if ((ancienTemps + vague * tempsNextWave) <= temps) // 5s de plus par vague
         {
+            socket.emit('score',vague,0,0);
             vague++;
             newWave(vague);
-            ancienTemps = ancienTemps + temps; 
-        } 
+            ancienTemps = temps; 
+        }
         updateAll(dt);
         suiviIA();
         collision();
 
-        update_player = {_id:0,
-            _x:gameObjects[0]._bbox._x,
-            _y:gameObjects[0]._bbox._y,
-            _speed:{_v:move_v(),_h:move_h()}
-        };
-
-        updateMoveObject(JSON.stringify(update_player));
+        eval(linearized);
         
-        temps = temps + 0.001 * REFRESHTIME; 
-        //REFRESHTIME = 5 ==> 100 ms, au bout de 1 tour, on a temps = 0 + 100 * 0.001 = 0.1s
+        temps = temps + 0.001 * dt;
     };
+
+    function move(x,y){
+        if (tpsmove >= REFRESHTIME3){
+
+            var h = (x-gameObjects[0]._bbox._x);
+            var v = (y-gameObjects[0]._bbox._y);
+
+            if(Math.abs(v)>Math.abs(h)){
+                h = (h * 0.1) / Math.abs(v);
+                if (v < 0) v = -0.1;
+                else if (v > 0) v = 0.1;
+                else v = 0;
+            }else{
+                v = (v * 0.1) / Math.abs(h);
+                if (h < 0) h = -0.1;
+                else if (h > 0) h = 0.1;
+                else h = 0;
+            }
+
+            update_player = {_id:0,
+                _x:gameObjects[0]._bbox._x,
+                _y:gameObjects[0]._bbox._y,
+                _speed:{_v:v,_h:h}
+            };
+
+            updateMoveObject(update_player);
+            tpsmove = 0;
+        }
+    }
 
     /**
      * Fonction qui met à jour les positions actuel des objets
@@ -157,31 +184,23 @@ io.sockets.on('connection', function (socket){
         var keys = Object.keys(gameObjects);
         var keysBullet = Object.keys(bulletObjects);
         for (var i=0; i<keys.length; i++){
-            // a Save the old values
-            var bbox = {_x:gameObjects[keys[i]]._bbox._x,
-                    _y:gameObjects[keys[i]]._bbox._y,
-                    _w:gameObjects[keys[i]]._bbox._w,
-                    _h:gameObjects[keys[i]]._bbox._h};
-            gameObjectsOldPosition[keys[i]] = bbox;
             // b Update values
-            gameObjects[keys[i]]._bbox._x = gameObjects[keys[i]]._bbox._x
-                + gameObjects[keys[i]]._speed._h * dt; // update x coordinate
-            gameObjects[keys[i]]._bbox._y = gameObjects[keys[i]]._bbox._y
-            + gameObjects[keys[i]]._speed._v * dt; // update y coordinate
-        };
+            if(gameObjects[i] != null){
+                gameObjects[keys[i]]._bbox._x = gameObjects[keys[i]]._bbox._x
+                    + gameObjects[keys[i]]._speed._h * dt; // update x coordinate
+                gameObjects[keys[i]]._bbox._y = gameObjects[keys[i]]._bbox._y
+                + gameObjects[keys[i]]._speed._v * dt; // update y coordinate
+            }
+        }
         for (var i=0; i<keysBullet.length; i++){
-            // a Save the old values
-            var bboxbullet = {_x:bulletObjects[keysBullet[i]]._bbox._x,
-                    _y:bulletObjects[keysBullet[i]]._bbox._y,
-                    _w:bulletObjects[keysBullet[i]]._bbox._w,
-                    _h:bulletObjects[keysBullet[i]]._bbox._h};
-            bulletObjectsOldPosition[keysBullet[i]] = bboxbullet;
             // b Update values
-            bulletObjects[keysBullet[i]]._bbox._x = bulletObjects[keysBullet[i]]._bbox._x
-                + bulletObjects[keysBullet[i]]._speed._h * dt; // update x coordinate
-            bulletObjects[keysBullet[i]]._bbox._y = bulletObjects[keysBullet[i]]._bbox._y
-                + bulletObjects[keysBullet[i]]._speed._v * dt; // update y coordinate
-        };
+            if(bulletObjects[i] != null){
+                bulletObjects[keysBullet[i]]._bbox._x = bulletObjects[keysBullet[i]]._bbox._x
+                    + bulletObjects[keysBullet[i]]._speed._h * dt; // update x coordinate
+                bulletObjects[keysBullet[i]]._bbox._y = bulletObjects[keysBullet[i]]._bbox._y
+                    + bulletObjects[keysBullet[i]]._speed._v * dt; // update y coordinate
+            }
+        }
     };
 
     /**
@@ -189,16 +208,10 @@ io.sockets.on('connection', function (socket){
      * @param data Variable contenant les informations de l'objet à mettre à jour
     **/
     function updateMoveObject(data) {
-        var realData = JSON.parse(data);
-        socket.emit("gameobject", data);
-        var bbox = {_x:gameObjects[realData._id]._bbox._x,
-            _y:gameObjects[realData._id]._bbox._y,
-            _w:gameObjects[realData._id]._bbox._w,
-            _h:gameObjects[realData._id]._bbox._h};
-        gameObjectsOldPosition[realData._id] = bbox;
-        gameObjects[realData._id]._bbox._x = realData._x;
-        gameObjects[realData._id]._bbox._y = realData._y;
-        gameObjects[realData._id]._speed = realData._speed;
+        socket.emit('gameobject', JSON.stringify(data));
+        gameObjects[data._id]._bbox._x = data._x;
+        gameObjects[data._id]._bbox._y = data._y;
+        gameObjects[data._id]._speed = data._speed;
     };
 
     /**
@@ -206,14 +219,18 @@ io.sockets.on('connection', function (socket){
      * @param data Variable contenant les informations de l'objet à initialiser
     **/
     function init(data) {
-        var realData = JSON.parse(data);
-        socket.emit("init", data);
-        gameObjects[realData._id] = realData;
-        var bbox = {_x:realData._bbox._x,
-            _y:realData._bbox._y,
-            _w:realData._bbox._w,
-            _h:realData._bbox._h};
-        gameObjectsOldPosition[realData._id] = bbox;
+        socket.emit('init', JSON.stringify(data));
+        gameObjects[data._id] = data;
+        morts[data._id] = 1;
+    };
+
+    /**
+    * Fonction qui change le type d'un ennemi
+    * @param data Variable contenant le nouveau type de l'IA
+    **/
+    function changeColor(data){
+        socket.emit('colorchange',JSON.stringify(data));
+        gameObjects[data._id]._type = data._type;
     };
 
     /**
@@ -221,7 +238,7 @@ io.sockets.on('connection', function (socket){
      * @param data Variable contenant l'id du vaisseau à effacer
     **/
     function clear(data) {
-        socket.emit("clearObject",data);
+        socket.emit('clearObject',JSON.stringify(data));
     };
 
     /**
@@ -229,102 +246,98 @@ io.sockets.on('connection', function (socket){
     **/
     function suiviIA(){
 
-        // Récupération des vitesses renvoyées par la fonction move() du joueur
-        var ph = move_h();
-        var pv = move_v();
-        // Déclaration d'une variables qui récupère tout les ids des objets
-        var keys = Object.keys(gameObjects);
-                
-        // On cape la vitesse du joueur, seul le vecteur directeur reste inchangé
-        if((ph<0)&&(pv<0)){
-            while(((ph<-0.05)||(pv<-0.05))){
-                ph = ph * 0.95;
-                pv = pv * 0.95;
+        if (tpsIA >= REFRESHTIME3){
+
+            // Player
+            var ux = ((gameObjects[0]._bbox._x)+(gameObjects[0]._speed._h*10));
+            var uy = ((gameObjects[0]._bbox._y)+(gameObjects[0]._speed._v*10));
+
+            // Mise à jour des IAs
+            for(var j=1;j<gameObjects.length;j++){
+
+                if(morts[j] == 1  && gameObjects[j] != null){
+                    // IA
+                    var u_x = ((gameObjects[j]._bbox._x)+(gameObjects[j]._speed._h*10));
+                    var u_y = ((gameObjects[j]._bbox._y)+(gameObjects[j]._speed._v*10));
+
+                    var h = (ux-u_x);
+                    var v = (uy-u_y);
+
+                    if(gameObjects[j]._type == "enemy1"){
+                        if(Math.abs(v)>Math.abs(h)){
+                            h = (h * 0.08) / Math.abs(v);
+                            if (v < 0) v = -0.08;
+                            else if (v > 0) v = 0.08;
+                            else v = 0;
+                        }else{
+                            v = (v * 0.08) / Math.abs(h);
+                            if (h < 0) h = -0.08;
+                            else if (h > 0) h = 0.08;
+                            else h = 0;
+                        }
+                    }else if(gameObjects[j]._type == "enemy2"){
+                        if(Math.abs(v)>Math.abs(h)){
+                            h = (h * 0.06) / Math.abs(v);
+                            if (v < 0) v = -0.06;
+                            else if (v > 0) v = 0.06;
+                            else v = 0;
+                        }else{
+                            v = (v * 0.06) / Math.abs(h);
+                            if (h < 0) h = -0.06;
+                            else if (h > 0) h = 0.06;
+                            else h = 0;
+                        }
+                    }else if(gameObjects[j]._type == "enemy3"){
+                        if(Math.abs(v)>Math.abs(h)){
+                            h = (h * 0.04) / Math.abs(v);
+                            if (v < 0) v = -0.04;
+                            else if (v > 0) v = 0.04;
+                            else v = 0;
+                        }else{
+                            v = (v * 0.04) / Math.abs(h);
+                            if (h < 0) h = -0.04;
+                            else if (h > 0) h = 0.04;
+                            else h = 0;
+                        }
+                    }else console.log("connais pas ce type de vaisseau !");
+
+                    update = {_id:j,
+                         _x:u_x, _y:u_y,
+                        _speed:{_v:v,_h:h}
+                    }
+
+                    updateMoveObject(update);
+                }
             }
-        }else if((ph>0)&&(pv<0)){
-            while(((ph>0.05)||(pv<-0.05))){
-                ph = ph * 0.95;
-                pv = pv * 0.95;
-            }
-        }else if((ph<0)&&(pv>0)){
-            while(((ph<-0.05)||(pv>0.05))){
-                ph = ph * 0.95;
-                pv = pv * 0.95;
-            }
-        }else if((ph>0)&&(pv>0)){
-            while(((ph>0.05)||(pv>0.05))){
-                ph = ph * 0.95;
-                pv = pv * 0.95;
-            }
+            tpsIA = 0;
         }
-
-        // Mise à jour du joueur
-        /*gameObjects[0]._speed._h = ph;
-        gameObjects[0]._speed._v = pv;*/
-
-        // A commenter
-        var ux = ((gameObjects[0]._bbox._x)+(gameObjects[0]._speed._h*10));
-        var uy = ((gameObjects[0]._bbox._y)+(gameObjects[0]._speed._v*10));
-
-        // On créé une variable qui prend la valeur du nouveau déplacement du joueur
-        update_player = {_id:0,
-            _x:ux, _y:uy,
-            _speed:{_v:pv,_h:ph}
-        };
-
-        // Mise à jours du déplacement du joueur
-        updateMoveObject(JSON.stringify(update_player));
-
-        // Mise à jour des IAs
-        for(var j=1;j<gameObjects.length;j++){
-
-            var u_x = ((gameObjects[j]._bbox._x)+(gameObjects[j]._speed._h*10));
-            var u_y = ((gameObjects[j]._bbox._y)+(gameObjects[j]._speed._v*10));
-
-            var h = (ux-u_x);
-            var v = (uy-u_y);
-
-            if((h<0)&&(v<0)){
-                while(((h<-0.05)||(v<-0.05))){
-                    h = h * 0.95;
-                    v = v * 0.95;
-                }
-            }else if((h>0)&&(v<0)){
-                while(((h>0.05)||(v<-0.05))){
-                    h = h * 0.95;
-                    v = v * 0.95;
-                }
-            }else if((h<0)&&(v>0)){
-                while(((h<-0.05)||(v>0.05))){
-                    h = h * 0.95;
-                    v = v * 0.95;
-                }
-            }else if((h>0)&&(v>0)){
-                while(((h>0.05)||(v>0.05))){
-                    h = h * 0.95;
-                    v = v * 0.95;
-                }
-            }       
-
-            update = {_id:j,
-                 _x:u_x, _y:u_y,
-                _speed:{_v:v,_h:h}
-            };
-
-            updateMoveObject(JSON.stringify(update));
-        };
     };
 
     // Fonction qui organise le pop des vagues d'IA
     function newWave(vague){
 
-        for(var id=1;id<=3*vague;id++){
-            obj = {_id:id,
-                _bbox:{_x:200+Math.random()*200, _y:200+Math.random()*200, _w:20, _h:20 },
-                _speed:{_v:0.05,_h:0},
-                _type:"enemy1"};
-            init(JSON.stringify(obj));
-            //nbObj++;
+        var nbObj = 0;
+        var id = 1;
+
+        while(nbObj != 3*vague){
+            if (morts[id] != 1){
+                var xIA = Math.random() * 640;
+                var yIA = Math.random() * 480;
+                var xPlayer = gameObjects[0]._bbox._x;
+                var yPlayer = gameObjects[0]._bbox._y;
+                while((Math.sqrt(Math.pow((xPlayer - xIA),2) + Math.pow((yPlayer - yIA),2))) <= 200)
+                {
+                    xIA = Math.random() * 640;
+                    yIA = Math.random() * 480;
+                }
+                obj = {_id:id,
+                    _bbox:{_x:xIA, _y:yIA, _w:20, _h:20 },
+                    _speed:{_v:0.05,_h:0},
+                    _type:"enemy3"};
+                init(obj);
+                nbObj++;
+            }            
+            id++;
         }
     };
 
@@ -346,317 +359,268 @@ io.sockets.on('connection', function (socket){
 
         // On prend les dernière valeurs des boxs des vaisseaux
         for (var i=0; i<gameObjects.length;i++){
-            bboxIA[i] = new bbox(gameObjects[keys[i]]._bbox._x,gameObjects[keys[i]]._bbox._y,gameObjects[keys[i]]._bbox._w,gameObjects[keys[i]]._bbox._h);
-        };
+            if (gameObjects[keys[i]] != null){
+                bboxIA[i] = new bbox(gameObjects[keys[i]]._bbox._x,gameObjects[keys[i]]._bbox._y,gameObjects[keys[i]]._bbox._w,gameObjects[keys[i]]._bbox._h);
+            }
+        }
         // On prend les dernière valeurs des boxs des bullets
         for (var i=0; i<bulletObjects.length;i++){
-            if (bulletObjects != []){
+            if (bulletObjects != [] && bulletObjects[keysBullet[i]] != null){
                 bboxBullet[i] = new bbox(bulletObjects[keysBullet[i]]._bbox._x,bulletObjects[keysBullet[i]]._bbox._y,bulletObjects[keysBullet[i]]._bbox._w,bulletObjects[keysBullet[i]]._bbox._h);
-            };
-        };
+            }
+        }
         
         // player VS IA
         for (var i=1; i<bboxIA.length; i++){
-            if(bboxIA[0].isColliding(bboxIA[i])){
-                touche = true;
-            };
-        };
+            if(morts[i] == 1){
+                if(bboxIA[0].isColliding(bboxIA[i])){
+                    touche = true;
+                }
+            }
+        }
             
         // player VS walls
         for (var i=0;i<4;i++){
-            if((bboxIA[0]._x>=640) || (bboxIA[0]._x<=0) || (bboxIA[0]._y>=480) || (bboxIA[0]._y<=0)){
+            if(bboxIA[0].isColliding(murs[i])){
                 touche = true;
-            };
-        };
+            }
+        }
            
         // IA VS walls
         for (var i=1;i<bboxIA.length;i++){
             for (var j=0;j<4;j++){
-                if(bboxIA[i].isColliding(murs[j]) && morts[i] == 1){
-                    var newIA = {
-                      _id   : i,
-                      _type : "deadI"
-                    };
-                    // A décommenter pour voir les IAs faire des mouvements aléatoire
-                    /*if(gameObjects[keys[i]]._speed._v > 0 && gameObjects[keys[i]]._speed._h <= 0){
-                        var update = {_id:i,
-                             _x:gameObjects[keys[i]]._bbox._x, 
-                             _y:gameObjects[keys[i]]._bbox._y,
-                            _speed:{_v:-0.05,_h:0.05}
+                if(morts[i] == 1){
+                    if(bboxIA[i].isColliding(murs[j])){
+                        morts[i] = 0;
+
+                        gameObjects[i] = null;
+
+                        obj = {
+                            _id : i,
+                            _type : "deadI"
                         };
-                    }else if(gameObjects[keys[i]]._speed._v < 0 && gameObjects[keys[i]]._speed._h > 0){
-                        var update = {_id:i,
-                             _x:gameObjects[keys[i]]._bbox._x, 
-                             _y:gameObjects[keys[i]]._bbox._y,
-                            _speed:{_v:0.05,_h:0.05}
-                        };
-                    }else if(gameObjects[keys[i]]._speed._v > 0 && gameObjects[keys[i]]._speed._h > 0){
-                        var update = {_id:i,
-                             _x:gameObjects[keys[i]]._bbox._x, 
-                             _y:gameObjects[keys[i]]._bbox._y,
-                            _speed:{_v:-0.05,_h:-0.05}
-                        };
-                    }else if(gameObjects[keys[i]]._speed._v < 0 && gameObjects[keys[i]]._speed._h < 0){
-                        var update = {_id:i,
-                             _x:gameObjects[keys[i]]._bbox._x, 
-                             _y:gameObjects[keys[i]]._bbox._y,
-                            _speed:{_v:0.05,_h:-0.05}
-                        };
+
+                        clear(obj);
                     }
-                    updateMoveObject(JSON.stringify(update));*/
-                    morts[i] = 0;
-                    gameObjects[i]._bbox._w = 0;
-                    gameObjects[i]._bbox._h = 0;
-                    clear(JSON.stringify(newIA));
-                };
-            };        
-        };
+                }
+            }        
+        }
 
         // IA VS Bullets
         for (var i=0;i<bboxBullet.length;i++)
         {
             for (var j=1;j<bboxIA.length;j++)
             {
-                if (bboxIA[j].isColliding(bboxBullet[i]))
-                {
-                    var newIA = {
-                      _id   : j,
-                      _w : 0,
-                      _h : 0,
-                      _type : "deadI"
+                if (morts[j] == 1 && bboxBullet[i] != null) {
+                    if (bboxIA[j].isColliding(bboxBullet[i]))
+                    {
+                        
+                        var typeIA = gameObjects[j]._type;
+                        var val = 0;
+                        
+                        if (typeIA == "enemy1") {
+                            morts[j] = 2;
+                            val = 10;
+                            gameObjects[j] = null;
+                            objI = {
+                                _id : j,
+                                _type : "deadI"
+                            };
+                            clear(objI);                            
+                        }
+                        else if (typeIA == "enemy2") {
+                            val = 20;
+                            objI2 = {
+                                _id : j,
+                                _type : "enemy1"
+                            }
+                            changeColor(objI2);
+                        } 
+                        else if (typeIA == "enemy3") {
+                            val = 30;
+                            objI3 = {
+                                _id : j,
+                                _type : "enemy2"
+                            }
+                            changeColor(objI3);
+                        } 
+                        
+                        bulletObjects[i] = null;
+
+                        objB = {
+                            _id : i,
+                            _type : "deadB"
+                        };
+                        
+                        clear(objB);
+                        
+                        socket.emit('score',0,val,0);
+                     }
+                }
+            }
+        }
+
+        for (var i=0; i<gameObjects.length;i++){
+            if(morts[j] == 1){
+                if (gameObjects[keys[i]]._bbox._x > 640 || gameObjects[keys[i]]._bbox._x < 0 || gameObjects[keys[i]]._bbox._y > 480 || gameObjects[keys[i]]._bbox._y < 0){
+                    gameObjects[i] = null;
+                    morts[i] = 0;
+                    objI = {
+                        _id : i,
+                        _type : "deadI"
                     };
-                    var newBullet = {
-                      _id   : i,
-                      _w : 0,
-                      _h : 0,
-                      _type : "deadB"
-                    };
-                    morts[j] = 2;
-                    bulletObjects[i]._bbox._w = 0;
-                    bulletObjects[i]._bbox._h = 0;
-                    gameObjects[j]._bbox._w = 0;
-                    gameObjects[j]._bbox._h = 0;
-                    clear(JSON.stringify(newIA));
-                    clear(JSON.stringify(newBullet));
-                 };
-            };
-        };
+                    clear(objI);
+                }
+            }
+        }
 
         // Si le joueur à touché un mur ou un vaisseau ennemi
         if (touche){
             // On stop les boucles côté serveur
             clearInterval(idMainBoucle);
-            clearInterval(idShotBoucle);
             // On envoie au client que le joueur à perdu
             socket.emit('defeat');
-        };
+        }
     };
 
     /**
-    *
+    * Fonction qui initialise les variables du côté serveur
     **/
     function initVariables(){
         t = Date.now();
         gameObjects = [];
-        gameObjectsOldPosition = [];
         bulletObjects = [];
-        bulletObjectsOldPosition = [];
         murs = [];
         morts = [];
         idShoot = 0;
         vague = 0;
         temps = 0;
         ancienTemps = 0;
-    };
-
-    /** 
-    * Fonction de mouvement possiblement entrable par le joueur (WorkInProgress)
-     @return M Correspond au couple de vitesse horizontale et vitesse verticale de l'objet
-    **/
-    function move(){
-
-        /*
-        var nearest = getNearest(1);
-        var distanceNearest = Math.sqrt((pla[0]._bbox._x-nearest._x) * 
-                            (pla[0]._bbox._x-nearest._x)+(pla[0]._bbox._y-nearest._y) * (pla[0]._bbox._y-nearest._y));
-
-        //640*480
-        if(pla[0]._bbox._x>=320){
-            var bordLeft = 0;
-            var distBord = 640 - pla[0]._bbox._x;
-        }else{
-            var bordLeft = 1;
-            var distBord = pla[0]._bbox._x;
-        }
-        if(pla[0]._bbox._y>=240){
-            var bordTop = 0;
-            var distBord = 480 - pla[0]._bbox._y;
-        }else{
-            var bordTop = 1;
-            var distBord = pla[0]._bbox._y;
-        }
-
-        var coin = 0;
-
-        if(bordTop==1){
-            if(bordLeft==1){
-                coin = 0;
-            }else{
-                coin = 1;
-            }
-        }else{
-            if(bordLeft==1){
-                coin = 2;
-            }else{
-                coin = 3;
-            }
-        }
-
-        var x;
-        var y;
-
-        switch(coin){
-            case 0:
-                x = 1; y = 1;
-                break;
-            case 1:
-                x = -1; y = 1;
-                break;
-            case 2:
-                x = -1; y = -1;
-                break;
-            case 3:
-                x = 1; y = -1;
-                break;
-        }
-
-        if(distanceNearest>distBord){
-
-        }*/
-
-        var dir = [];
-
-        //640*480
-        if((gameObjects[0]._bbox._x<100)&&(gameObjects[0]._bbox._y<380)){
-            dir[0] = 0.00;
-            dir[1] = 0.1;
-        } else{
-            if((gameObjects[0]._bbox._x<540)&&(gameObjects[0]._bbox._y>=380)){
-                dir[0] = 0.1;
-                dir[1] = 0.00;
-            } else{
-                if((gameObjects[0]._bbox._x>=540)&&(gameObjects[0]._bbox._y>=100)){
-                    dir[0] = 0.00;
-                    dir[1] = -0.1;
-                } else{
-                    if((gameObjects[0]._bbox._x>=100)&&(gameObjects[0]._bbox._y<100)){
-                        dir[0] = -0.1;
-                        dir[1] = 0.00;
-                    }
-                }
-            }
-        }
-        var M = {
-            _x:dir[0],
-            _y:dir[1]};
-
-        M = {
-           _x:0,
-           _y:0}; 
-
-        return (M);
+        accu = 0;
+        tpshoot = 0;
+        tpsIA = REFRESHTIME3;
+        tpsmove = REFRESHTIME3;
+        tempsNextWave = 5;
+        accu2 = tempsNextWave;
+        linearized = "";
     };
 
     /**
-     * Fonction qui retourne la vitesse horizontale de la fonction move()
-     * @return: h._x (Vitesse horizontale)
+     * Fonction qui retourne la Nième IA la plus proche
+     * @param n Rang de l'IA voulue classée par distance
+     * @return nearestObj[n] IA du rang n
     **/
-    function move_h(){
-        h = move();
-        return(h._x);
-    }
+    function getNearest(n){
+        var rangs = [];
+        var nearestObj = [];
+        var vivant = 0;
+        var trouve = false;
+        var obj = null;
+        var nbVivant = 0;
+        var nObj = [];
 
-    /** 
-     * Fonction qui retourne la vitesse verticale de la fonction move()
-     * @return v._y (Vitesse verticale)
-    **/ 
-    function move_v(){
-        v = move();
-        return(v._y);
-    }
+        for(var l=1;l<gameObjects.length;l++){
+            if (morts[l] == 1){
+                nbVivant++;
+            }
+        }
+
+        if (nbVivant < 1 || n < 1){
+            obj = {
+                _x : -1,
+                _y : -1
+            };
+        }else{
+
+            var cpt = 0;
+            var tmp;
+
+            for(var i=1;i<gameObjects.length;i++){
+                if(morts[i] == 1){
+                    tmp = Math.sqrt(
+                        (gameObjects[0]._bbox._x-gameObjects[i]._bbox._x) * (gameObjects[0]._bbox._x-gameObjects[i]._bbox._x)
+                        +
+                        (gameObjects[0]._bbox._y-gameObjects[i]._bbox._y) * (gameObjects[0]._bbox._y-gameObjects[i]._bbox._y));
+                    objtmp = {
+                        _id : i,
+                        _val : tmp
+                    }
+                    nObj[cpt] = objtmp;
+                    cpt++;
+                }
+            }
+
+            var triVal = function(a, b){
+              if (a._val < b._val) return -1;
+              if (a._val > b._val) return 1;
+              if (a._val == b._val) return 0;
+            }
+
+            nObj.sort(triVal);
+
+            if(nObj[n-1] != null){
+                obj = {
+                    _x : gameObjects[nObj[n-1]._id]._bbox._x,
+                    _y : gameObjects[nObj[n-1]._id]._bbox._y
+                };
+            }else{
+                obj = {
+                    _x : -1,
+                    _y : -1
+                };
+            }
+        }
+            
+        return(obj);
+    };
 
     /**
     * Fonction qui envoie les bullets au client 
     **/
-    function shoot(){
-        obj = {_id:idShoot,
-              _bbox:{_x:gameObjects[0]._bbox._x, 
-                    _y:gameObjects[0]._bbox._y,
-                    _w:5,
-                    _h:5},
-              _speed:{_v:0.1,_h:0.1},
-              _type:"bullet"
-        };
-        bulletObjects[obj._id] = obj;
-        var bbox = {_x:obj._bbox._x,
-            _y:obj._bbox._y,
-            _w:obj._bbox._w,
-            _h:obj._bbox._h};
-        bulletObjectsOldPosition[obj._id] = bbox;
-        socket.emit('initBullet',JSON.stringify(obj));
-        idShoot++;
-        idShoot %= 80;
+    function shoot(x, y){
+        if (tpshoot >= REFRESHTIME2){
+
+            var shoot_h = (x-gameObjects[0]._bbox._x);
+            var shoot_v = (y-gameObjects[0]._bbox._y);
+
+            if(Math.abs(shoot_v)>Math.abs(shoot_h)){
+                shoot_h = (shoot_h * 0.1) / Math.abs(shoot_v);
+                if (shoot_v < 0) shoot_v = -0.1;
+                else if (shoot_v > 0) shoot_v = 0.1;
+                else shoot_v = 0;
+            }else{
+                shoot_v = (shoot_v * 0.1) / Math.abs(shoot_h);
+                if (shoot_h < 0) shoot_h = -0.1;
+                else if (shoot_h > 0) shoot_h = 0.1;
+                else shoot_h = 0;
+            }
+
+            obj = {_id:idShoot,
+                  _bbox:{_x:gameObjects[0]._bbox._x, 
+                        _y:gameObjects[0]._bbox._y,
+                        _w:5,
+                        _h:5},
+                  _speed:{_v:2*shoot_v,_h:2*shoot_h},
+                  _type:"bullet"
+            };
+            bulletObjects[obj._id] = obj;
+            socket.emit('initBullet',JSON.stringify(obj));
+            idShoot++;
+            idShoot %= 80;
+            tpshoot = 0;
+        }
     };
+    
+    socket.on('disconnect', function(){
+        clearInterval(idMainBoucle);
+        initVariables();
+    });
 
     // socket qui se lance lorsque le client clique sur commit
-    socket.on("commit", function(data){
+    socket.on('commit', function(data){
     	var lines = JSON.parse(data);
-    	var linearized = lines.join(" ");
-    	eval(linearized);
+    	linearized = lines.join(" ");
+    	t = Date.now();
+        if (!idMainBoucle) idMainBoucle = setInterval(mainLoop, REFRESHTIME);
     });
 });
-
-
-/**
- * Fonction qui retourne la Nième IA la plus proche
- * @param n Rang de l'IA voulue classée par distance
- * @return: nearestObj[n] IA du rang n
-**/
-function getNearest(n){
-	var distances = [];
-	var rangs = [];
-	var nearestObj = [];
-
-	for(var l=1;l<=gameObjects.length;l++){
-		rangs[l] = 0;
-	}
-
-	var distanceNearest = Math.sqrt(
-		(gameObjects[0]._bbox._x-gameObjects[1]._bbox._x) * (gameObjects[0]._bbox._x-gameObjects[1]._bbox._x)
-		+
-		(gameObjects[0]._bbox._y-gameObjects[1]._bbox._y) * (gameObjects[0]._bbox._y-gameObjects[1]._bbox._y)
-	);
-
-	for(var j=1;j<gameObjects.length;j++){
-
-		for(var i=2;i<=gameObjects.length;i++){
-			if(rangs[i]!=1){
-				var distance_i = Math.sqrt(
-				(gameObjects[0]._bbox._x-gameObjects[i]._bbox._x) * (gameObjects[0]._bbox._x-gameObjects[i]._bbox._x)
-				+
-				(gameObjects[0]._bbox._y-gameObjects[i]._bbox._y) * (gameObjects[0]._bbox._y-gameObjects[i]._bbox._y)
-				);
-				if(distanceNearest>distance_i){
-					distanceNearest = distance_i;
-					var rang_suppr = i;
-					var nObj = gameObjects[i];
-				}
-			}
-		}
-		distances[j] = distanceNearest;
-		rangs[rang_suppr] = 1;
-		nearestObj[j] = nObj;
-		distanceNearest = 0;
-	}
-	return(nearestObj[n]);
-};
