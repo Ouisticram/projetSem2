@@ -1,6 +1,6 @@
 var evil = require("http").createServer(httpHandler);
 var url = require('url');
-var io   = require("socket.io").listen(evil);
+var io   = require("socket.io")(evil);
 var fs   = require("fs");
 var grid = require("./grid");
 var bbox = require("./bbox");
@@ -49,7 +49,7 @@ function httpHandler(req, res) {
 };
 
 // socket déclenché au chargement de la page
-io.sockets.on('connection', function (socket){
+io.on('connection', function (socket){
     // temps actuel
     var t;
     // variable contenant la liste de tout les objets sur la map avec leur position actuel
@@ -86,6 +86,8 @@ io.sockets.on('connection', function (socket){
     var obj;
     // Variable qui contient le type d'ennemi
     var ennemi;
+    // tableau définition des vagues
+    var tab;
 
     initVariables();
 
@@ -316,10 +318,14 @@ io.sockets.on('connection', function (socket){
     // Fonction qui organise le pop des vagues d'IA
     function newWave(vague){
 
+        var nbObjR = 0;
+        var nbObjJ = 0;
+        var nbObjV = 0;
         var nbObj = 0;
         var id = 1;
-
-        while(nbObj != 3*vague){
+        var type = "vide";
+        
+        while(nbObj != (tab[vague-1]._r + tab[vague-1]._j + tab[vague-1]._v)){
             if (morts[id] != 1){
                 var xIA = Math.random() * 640;
                 var yIA = Math.random() * 480;
@@ -330,12 +336,25 @@ io.sockets.on('connection', function (socket){
                     xIA = Math.random() * 640;
                     yIA = Math.random() * 480;
                 }
+                
+                if (nbObjR < tab[vague-1]._r) {
+                    type = "enemy1";
+                    nbObjR++;
+                }else if (nbObjJ < tab[vague-1]._j) {
+                    type = "enemy2";
+                    nbObjJ++;
+                }else if (nbObjV < tab[vague-1]._v) {
+                        type = "enemy3";
+                        nbObjV++;
+                }
+
                 obj = {_id:id,
                     _bbox:{_x:xIA, _y:yIA, _w:20, _h:20 },
                     _speed:{_v:0.05,_h:0},
-                    _type:"enemy3"};
+                    _type: type};
                 init(obj);
-                nbObj++;
+
+                nbObj++;                
             }            
             id++;
         }
@@ -500,9 +519,35 @@ io.sockets.on('connection', function (socket){
         tpshoot = 0;
         tpsIA = REFRESHTIME3;
         tpsmove = REFRESHTIME3;
-        tempsNextWave = 5;
+        tempsNextWave = 2;
         accu2 = tempsNextWave;
         linearized = "";
+        tab = []
+  
+
+        var rouge = 0;
+        var jaune = 0;
+        var violet = 0;
+        var tmp = 0;
+        for (var i=1;i<101;i++)
+        {
+            rouge = 0;
+            jaune = 0;
+            violet = 0
+            tmp = i;
+            while(tmp>12)
+            {
+                tmp = tmp - 13;
+                violet++;
+            }
+            while(tmp>3)
+            {
+                tmp = tmp - 4;
+                jaune++;
+            }
+            rouge = tmp;
+            tab[i-1] = {_r : rouge*3, _j : jaune*3, _v : violet*3}
+        };
     };
 
     /**
