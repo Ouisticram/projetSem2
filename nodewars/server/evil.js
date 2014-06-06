@@ -655,6 +655,38 @@ io.on('connection', function (socket){
             tpshoot = 0;
         }
     };
+
+    /**
+    * Fonction qui indique la position sur l'axe des abscisses du vaisseau du joueur
+    * @return x La position en x du vaisseau du joueur 
+    **/
+    function getX(){
+        return gameObjects[0]._bbox._x;
+    }
+
+    /**
+    * Fonction qui indique la position sur l'axe des ordonnées du vaisseau du joueur
+    * @return y La position en y du vaisseau du joueur 
+    **/
+    function getY(){
+        return gameObjects[0]._bbox._y;
+    }
+
+    /**
+    * Fonction qui indique la vitesse verticale du vaisseau du joueur
+    * @return v La vitesse vertical du vaisseau du joueur 
+    **/
+    function getV(){
+        return gameObjects[0]._speed._v;
+    }
+
+    /**
+    * Fonction qui indique la vitesse horizontale du vaisseau du joueur
+    * @return v La vitesse hrizontale du vaisseau du joueur 
+    **/
+    function getH(){
+        return gameObjects[0]._speed._h;
+    }
     
     socket.on('disconnect', function(){
         clearInterval(idMainBoucle);

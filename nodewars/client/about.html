@@ -68,9 +68,13 @@
         <li><h2>Un peu d'aide ?</h2></li>
             <p>Afin de vous faciliter la programmation, quelques fonctions sont utilisables :<p>
             <ul>
-                <li>getNearest(n) : [n: entier] Retourne le nième ennemi le plus proche du joueur sous la forme d'un objet obj = { _x=?, _y=?}. On y accède par obj._x et obj._y</li>
-                <li>shoot(x,y) : [x: entier, y:entier] Permet au vaisseau de déclencher un tir vers des coordonnées passées en paramètres.</li>
-                <li>move(x,y) : [x: entier, y:entier] Fonction qui déplace le vaisseau vers des coordonnées passées en paramètres.</li>
+                <li>getNearest(n) : [n: réel] Retourne le nième ennemi le plus proche du joueur sous la forme d'un objet obj = { _x=?, _y=?}. On y accède par obj._x et obj._y</li>
+                <li>shoot(x,y) : [x: réel, y: réel] Permet au vaisseau de déclencher un tir vers des coordonnées passées en paramètres.</li>
+                <li>move(x,y) : [x: réel, y: réel] Fonction qui déplace le vaisseau vers des coordonnées passées en paramètres.</li>
+                <li>getX() : [x: réel] Fonction qui indique la position sur l'axe des abscisses du vaisseau du joueur.</li>
+                <li>getY() : [y: réel] Fonction qui indique la position sur l'axe des ordonnées du vaisseau du joueur.</li>
+                <li>getV() : [v: réel] Fonction qui indique la vitesse verticale du vaisseau du joueur.</li>
+                <li>getH() : [h: réel] Fonction qui indique la vitesse horizontale du vaisseau du joueur.</li>
             </ul>
          <li><h2>Dernières précisions</h2></li>
          <p>Le code tapé est exécuté en boucle toutes 15ms, attention aux boucles imbriquées trop longues qui dépasseraient ce temps ... </p>
